@@ -1,0 +1,20 @@
+[
+  {
+    "id": "pi-openpibot",
+    "name": "Pi OpenPiBot",
+    "kind": "Native service",
+    "location": "Raspberry Pi / Tailscale",
+    "base_url": "http://100.121.119.108:11437",
+    "api_key": "REPLACE_WITH_AGENT_API_KEY",
+    "container": "openpibot.service"
+  },
+  {
+    "id": "example-agent",
+    "name": "Example Plant Floor Agent",
+    "kind": "Docker container or native service",
+    "location": "Plant device, cell, workstation, or server",
+    "base_url": "http://TAILSCALE_OR_LAN_IP:PORT",
+    "api_key": "REPLACE_WITH_AGENT_API_KEY",
+    "container": "optional-service-or-container-name"
+  }
+]

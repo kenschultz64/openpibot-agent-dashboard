@@ -1,0 +1,37 @@
+# Secrets & credentials
+endpoints.json
+endpoints.json.bak*
+*.bak
+.env
+*.env
+
+# Runtime state
+sessions/
+logs/
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+*.egg-info/
+*.dist-info/
+build/
+dist/
+.eggs/
+*.egg
+
+# Package artifacts
+*.zip
+*.tar.gz
+*.sha256

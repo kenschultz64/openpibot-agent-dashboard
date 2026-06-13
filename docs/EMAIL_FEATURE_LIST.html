@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+  <body style="font-family:Arial,Helvetica,sans-serif;color:#1f2937;line-height:1.45">
+    <h2 style="color:#0f172a">OpenPiBot Multi-Agent Dashboard — Feature List</h2>
+    <p>Ken,</p>
+    <p>Attached is the proof-of-concept package for the Raspberry Pi OpenPiBot dashboard. It includes the app source, sanitized config example, systemd service, proposal writeup, install/operations notes, API reference, security notes, and feature list.</p>
+
+    <h3 style="color:#0369a1">What the proof of concept demonstrates</h3>
+    <ul>
+      <li><strong>Raspberry Pi as an AI control node:</strong> OpenPiBot runs on a Pi and exposes an OpenAI-compatible control interface.</li>
+      <li><strong>Multi-agent dashboard:</strong> One browser page monitors and controls multiple OpenPiBot-compatible endpoints.</li>
+      <li><strong>Device/software control path:</strong> The same pattern can control local programs, Pi Pico projects, sensors, robotic arms, Blender/design workflows, and plant-floor devices.</li>
+      <li><strong>Hermes-like control layer:</strong> The architecture points toward a lightweight, custom agent-control CLI/dashboard for moving quickly from device to device.</li>
+    </ul>
+
+    <h3 style="color:#0369a1">Dashboard features</h3>
+    <ul>
+      <li>Online/offline health cards for each configured agent.</li>
+      <li>Continuous polling of <code>/health</code> and <code>/v1/models</code>.</li>
+      <li>Chat / Control Console for one selected agent or all online agents.</li>
+      <li>Persistent per-agent session context.</li>
+      <li>New Session, Clear Window, and Clear Context controls.</li>
+      <li>Stop button for active requests.</li>
+      <li>Command / Activity Monitor with persistent redacted logs.</li>
+      <li>Manage Agents UI for adding, testing, saving, updating, and removing bots without SSH/JSON editing.</li>
+      <li>Server-side API key storage; saved keys are not returned to the browser.</li>
+      <li>Systemd boot startup so the dashboard comes back after Pi reboot.</li>
+    </ul>
+
+    <h3 style="color:#0369a1">Potential plant-management uses</h3>
+    <ul>
+      <li>Plant device status dashboard.</li>
+      <li>Sensor monitoring and troubleshooting.</li>
+      <li>Robotic arm or machine-control assistant with safety rules.</li>
+      <li>Pi Pico/microcontroller programming station.</li>
+      <li>PC application automation for drawing, CAD, Blender, or digital-printing workflows.</li>
+      <li>Maintenance assistant for diagnostics, service resets, logs, and checklists.</li>
+    </ul>
+
+    <h3 style="color:#0369a1">Recommended next steps</h3>
+    <ol>
+      <li>Add dashboard login/authentication.</li>
+      <li>Create an installer script for fresh Raspberry Pis.</li>
+      <li>Add device/agent groups by plant, line, room, or cell.</li>
+      <li>Create agent templates for Pi, workstation, sensor, robot, and fabrication use cases.</li>
+      <li>Add approval/safety rules for dangerous commands.</li>
+      <li>Pilot with 2–5 real devices in a plant/lab environment.</li>
+    </ol>
+
+    <p><strong>Security note:</strong> The package is sanitized. It does not include live API keys, live endpoint config, chat sessions, or logs.</p>
+    <p>— PA-Ken</p>
+  </body>
+</html>

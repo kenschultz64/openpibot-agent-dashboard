@@ -1,0 +1,19 @@
+# /home/ken/.config/systemd/user/openpibot-dashboard.service
+[Unit]
+Description=OpenPiBot endpoint real-time dashboard
+After=network-online.target openpibot.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ken/openpibot-dashboard
+Environment=OPENPIBOT_DASHBOARD_DIR=/home/ken/openpibot-dashboard
+Environment=OPENPIBOT_DASHBOARD_HOST=0.0.0.0
+Environment=OPENPIBOT_DASHBOARD_PORT=8766
+Environment=OPENPIBOT_DASHBOARD_POLL_INTERVAL=3
+ExecStart=/usr/bin/python3 /home/ken/openpibot-dashboard/dashboard.py
+Restart=unless-stopped
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,184 +1,157 @@
 # Tailscale Hardening Guide
 
-This document covers how to secure the OpenPiBot dashboard for Tailscale exposure.
+This document describes the security hardening applied to the OpenPiBot dashboard for Tailscale exposure. Last updated: June 14, 2026.
 
-## Threat model
+## Current Hardening (all implemented)
 
-- **Closed LAN (current):** Dashboard is behind a firewall, only accessible from trusted LAN/Tailscale peers. No authentication required.
-- **Tailscale exposure (target):** Dashboard is reachable from other Tailscale peers. Needs authentication, HTTPS, and access control.
-- **Internet exposure (not recommended):** Requires full auth, HTTPS, rate limiting, and WAF.
-
-## Recommended Tailscale hardening (in order of priority)
-
-### 1. Add HTTP basic authentication
-
-Simplest first layer of defense. Add to `dashboard.py` before any route handling:
-
-```python
-import base64
-
-DASHBOARD_AUTH_USER = os.environ.get("OPENPIBOT_DASHBOARD_AUTH_USER", "admin")
-DASHBOARD_AUTH_PASS = os.environ.get("OPENPIBOT_DASHBOARD_AUTH_PASS", "")
-
-def check_auth(self) -> bool:
-    auth = self.headers.get("Authorization", "")
-    if not auth.startswith("Basic "):
-        self.send_response(401)
-        self.send_header("WWW-Authenticate", 'Basic realm="OpenPiBot Dashboard"')
-        self.end_headers()
-        return False
-    try:
-        decoded = base64.b64decode(auth[6:]).decode()
-        user, password = decoded.split(":", 1)
-        if user == DASHBOARD_AUTH_USER and password == DASHBOARD_AUTH_PASS:
-            return True
-    except Exception:
-        pass
-    self.send_response(401)
-    self.send_header("WWW-Authenticate", 'Basic realm="OpenPiBot Dashboard"')
-    self.end_headers()
-    return False
-```
-
-Call `check_auth()` at the top of `do_GET` and `do_POST`.
-
-### 2. Use Tailscale Serve for HTTPS
-
-Instead of self-managing TLS certificates, use Tailscale Serve:
+### 1. HTTP Basic Authentication
+All endpoints (HEAD, GET, POST) require authentication. Configured via environment variables:
 
 ```bash
-# On the Pi (or a Tailscale node that can reach the Pi)
-tailscale serve --bg https://openpibot-dashboard 100.121.119.108:8766
+OPENPIBOT_DASHBOARD_USER=admin
+OPENPIBOT_DASHBOARD_PASS=<strong-password>
 ```
 
-This gives you:
-- Automatic HTTPS via Tailscale's cert authority
-- DNS name: `https://openpibot-dashboard` (or whatever name you choose)
-- No certificate management
+If no credentials are configured (`OPENPIBOT_DASHBOARD_USER` empty), auth is disabled (for development only).
 
-### 3. Restrict with Tailscale ACLs
+Implementation details:
+- Uses `secrets.compare_digest()` for timing-safe password comparison
+- Returns 401 with `WWW-Authenticate: Basic` header
+- Dashboard HTML page triggers browser's native auth dialog
 
-In your Tailscale network ACL (`tailscale/acl.json`), restrict dashboard access:
-
-```json
-{
-  "acls": [
-    {
-      "action": "accept",
-      "src": ["user:ken@example.com"],
-      "dst": ["tag:openpibot-dashboard:8766"]
-    }
-  ]
-}
-```
-
-### 4. Bind to Tailscale IP only
-
-For extra safety, bind only to the Tailscale IP instead of `0.0.0.0`:
+### 2. Tailscale Serve for HTTPS
+TLS termination via Tailscale Serve with automatic Let's Encrypt certificate:
 
 ```bash
-OPENPIBOT_DASHBOARD_HOST=100.121.119.108
+sudo tailscale set --operator=$USER
+tailscale serve --bg http://100.121.119.108:8766
 ```
 
-This ensures the dashboard is only reachable via Tailscale.
+This provides:
+- Automatic HTTPS at `https://mattpi.tail5f2bd.ts.net/`
+- TLS 1.3 with ChaCha20-Poly1305
+- No manual certificate management
+- Tailscale-managed cert rotation
 
-### 5. Add API key authentication for agent management
+### 3. iptables Firewall Rules
+Port 8766 restricted to Tailscale subnet only (persisted to `/etc/iptables/rules.v4`):
 
-The `/api/agents` POST endpoint should require an additional API key for write operations:
-
-```python
-DASHBOARD_API_KEY = os.environ.get("OPENPIBOT_DASHBOARD_API_KEY", "")
-
-def check_api_key(self) -> bool:
-    key = self.headers.get("X-Dashboard-API-Key", "")
-    if key == DASHBOARD_API_KEY:
-        return True
-    self.send_error(403, "Forbidden: invalid API key")
-    return False
+```
+ACCEPT tcp -- 100.64.0.0/10 → dpt:8766
+DROP   tcp -- 0.0.0.0/0    → dpt:8766
 ```
 
-### 6. Rate limiting
+### 4. Security Headers
+All responses include:
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `Referrer-Policy: no-referrer`
+- `Content-Security-Policy: default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'`
+- `Access-Control-Allow-Origin` (matches request Origin)
+- `Cache-Control: no-store`
 
-Add simple rate limiting to prevent abuse:
+### 5. Rate Limiting
+In-memory per-IP rate limiting (resets on restart):
+- Chat endpoints: 60 requests/minute
+- Agent management endpoints: 10 requests/minute
+- Rate limit window: 60 seconds
+- Returns 429 with JSON error on excess
 
-```python
-import time
-from collections import defaultdict
+### 6. Agent URL IP Allowlisting (SSRF Prevention)
+Agent management endpoints reject URLs pointing to non-private IP ranges. Allowed ranges:
+- `100.64.0.0/10` — Tailscale
+- `10.0.0.0/8` — Class A private
+- `172.16.0.0/12` — Class B private
+- `192.168.0.0/16` — Class C private
+- `127.0.0.0/8` — loopback
 
-RATE_LIMIT_WINDOW = 60  # seconds
-RATE_LIMIT_MAX = 100    # requests per window
+Hostname resolution is rejected outright — only IP addresses in allowed ranges are accepted.
 
-rate_limits = defaultdict(list)
+### 7. Server Header Suppression
+`Server: OpenPiBot Dashboard` instead of `Server: BaseHTTP/0.6 Python/3.13.5`
 
-def check_rate_limit(client_ip: str) -> bool:
-    now = time.time()
-    rate_limits[client_ip] = [t for t in rate_limits[client_ip] if now - t < RATE_LIMIT_WINDOW]
-    if len(rate_limits[client_ip]) >= RATE_LIMIT_MAX:
-        return False
-    rate_limits[client_ip].append(now)
-    return True
-```
+### 8. Randomized Session IDs
+Session IDs now include 4 bytes of random hex via `secrets.token_hex(4)`, making them unguessable.
 
-### 7. Input validation
+### 9. CORS Preflight Support
+OPTIONS handler returns 204 with security headers for cross-origin requests.
 
-- Validate agent IDs against a safe character set (alphanumeric, dash, underscore, dot)
-- Validate URLs to prevent SSRF
-- Sanitize all user input before writing to `endpoints.json`
-
-### 8. Audit logging
-
-Log all dashboard actions (agent add/remove/test, chat sends, cancellations) with timestamps and source IPs.
-
-### 9. CORS protection
-
-For Tailscale exposure, restrict CORS to only allow requests from the dashboard itself:
-
-```python
-self.send_header("Access-Control-Allow-Origin", "https://openpibot-dashboard")
-```
-
-## Deployment checklist for Tailscale
-
-- [ ] HTTP basic auth enabled
-- [ ] Tailscale Serve configured for HTTPS
-- [ ] Tailscale ACLs restrict access to authorized users
-- [ ] Dashboard binds to Tailscale IP only
-- [ ] API key required for agent management endpoints
-- [ ] Rate limiting enabled
-- [ ] Input validation on all endpoints
-- [ ] Audit logging enabled
-- [ ] CORS restricted to dashboard origin
-- [ ] No sensitive data in logs
-
-## Environment variables for production
+## Environment Variables
 
 ```bash
-# Required for Tailscale deployment
-OPENPIBOT_DASHBOARD_HOST=100.121.119.108
-OPENPIBOT_DASHBOARD_PORT=8766
-OPENPIBOT_DASHBOARD_AUTH_USER=admin
-OPENPIBOT_DASHBOARD_AUTH_PASS=STRONG_PASSWORD_HERE
-OPENPIBOT_DASHBOARD_API_KEY=STRONG_API_KEY_HERE
+# Network
+OPENPIBOT_DASHBOARD_HOST=0.0.0.0          # Dashboard bind address (firewall-gated)
+OPENPIBOT_DASHBOARD_PORT=8766             # Dashboard port
+
+# Authentication
+OPENPIBOT_DASHBOARD_USER=admin            # Basic auth username (empty = disabled)
+OPENPIBOT_DASHBOARD_PASS=<password>       # Basic auth password
+
+# Rate Limiting
+OPENPIBOT_DASHBOARD_RATE_CHAT=60          # Chat endpoint req/min
+OPENPIBOT_DASHBOARD_RATE_AGENT=10         # Agent management req/min
+
+# Polling
+OPENPIBOT_DASHBOARD_POLL_INTERVAL=3       # Seconds between agent health polls
+OPENPIBOT_DASHBOARD_TIMEOUT=5             # Seconds before agent HTTP timeout
 ```
 
-## Alternative: Tailscale Funnel (internet exposure)
+## Systemd Service
 
-**Not recommended** for this dashboard without significant hardening. If you must expose to the internet:
+```
+[Unit]
+Description=OpenPiBot endpoint real-time dashboard
+After=network-online.target openpibot.service
+Wants=network-online.target
 
-1. Use Tailscale Funnel instead of Serve
-2. Add strong authentication (not just basic auth)
-3. Add rate limiting
-4. Add CSRF protection
-5. Use a WAF (Web Application Firewall)
-6. Monitor logs for abuse
+[Service]
+Type=simple
+WorkingDirectory=/home/ken/openpibot-dashboard
+Environment=OPENPIBOT_DASHBOARD_DIR=/home/ken/openpibot-dashboard
+Environment=OPENPIBOT_DASHBOARD_HOST=0.0.0.0
+Environment=OPENPIBOT_DASHBOARD_PORT=8766
+Environment=OPENPIBOT_DASHBOARD_USER=admin
+Environment=OPENPIBOT_DASHBOARD_PASS=<password>
+Environment=OPENPIBOT_DASHBOARD_POLL_INTERVAL=3
+ExecStart=/usr/bin/python3 /home/ken/openpibot-dashboard/dashboard.py
+Restart=unless-stopped
+RestartSec=5
 
-```bash
-tailscale funnel --bg https://openpibot-dashboard-public 100.121.119.108:8766
+[Install]
+WantedBy=default.target
 ```
 
-## Notes
+## Threat Model
 
-- The dashboard currently uses Python's built-in `http.server` which is not designed for production use.
-- For production, consider migrating to a proper web framework (Flask, FastAPI, etc.)
-- The current implementation has no session management or persistent authentication.
-- All security measures should be tested before deployment.
+| Exposure | Mitigations |
+|----------|-------------|
+| Tailscale peer accesses dashboard | Basic auth, HTTPS, security headers |
+| Local network device scans port 8766 | iptables DROP for non-Tailscale sources |
+| Malicious agent URL via agent management | IP allowlisting (private ranges only) |
+| Brute-force auth attempts | Rate limiting (10 req/min on agent endpoints) |
+| XSS via chat responses | Content-Security-Policy + output escaping |
+| Clickjacking | X-Frame-Options: DENY |
+| MIME sniffing | X-Content-Type-Options: nosniff |
+| Session enumeration | Randomized session IDs with 32-bit entropy |
+
+## Not Yet Implemented
+
+- Tailscale ACLs restricting to specific users (requires Tailscale admin console)
+- RBAC (viewer/operator/admin roles — Layer 4)
+- Command safety allowlists (Layer 6 — needed for plant/robotics use)
+- Audit logging of auth events (Layer 8)
+- HTTPS without `-k` on non-Tailscale devices (Let's Encrypt cert is Tailscale-managed)
+
+## Deployment Checklist
+
+- [x] HTTP Basic Auth enabled (June 14 2026)
+- [x] Tailscale Serve for HTTPS (June 14 2026)
+- [x] Firewall restricting to Tailscale subnet (June 14 2026)
+- [x] Security headers on all responses (June 14 2026)
+- [x] Rate limiting on POST endpoints (June 14 2026)
+- [x] Agent URL IP allowlisting (June 14 2026)
+- [x] Randomized session IDs (June 14 2026)
+- [x] Server header suppressed (June 14 2026)
+- [ ] Tailscale ACLs restricting to specific users
+- [ ] RBAC (viewer/operator/admin)
+- [ ] Command safety allowlists for plant/robotics use

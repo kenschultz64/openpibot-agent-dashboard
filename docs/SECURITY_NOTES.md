@@ -1,74 +1,74 @@
-# Security Notes
+# Security Notes — OpenPiBot Dashboard
 
-## Credential handling
+Last updated: June 14, 2026
 
-The live dashboard uses `endpoints.json` to store agent API keys. This file should not be published or sent externally.
+## Current Security Posture
 
-Required permission:
+### Access
+- **URL:** `https://mattpi.tail5f2bd.ts.net/` (Tailscale only)
+- **Auth:** HTTP Basic Authentication
+- **TLS:** Tailscale Serve with Let's Encrypt (auto-renewed)
 
-```bash
-chmod 600 /home/ken/openpibot-dashboard/endpoints.json
-```
+### Attack Surface
+- Only reachable via Tailscale network (iptables DROP for all other sources)
+- Agent management restricted to private IP ranges only
+- Rate limited (60/min chat, 10/min agent management)
 
-The browser-facing API intentionally returns only sanitized agent metadata. It should not reveal raw API keys.
+### Credential Storage
+- API keys stored in `endpoints.json` (mode 0600)
+- Auth password stored in systemd environment variables
+- No secrets committed to git repository (`.gitignore` excludes `endpoints.json`, `.env`)
+- Session files at mode 0600
 
-## What this package excludes
+### Secret Redaction
+- All API keys, tokens, and passwords filtered from logs before write
+- Bearer tokens in agent responses redacted before display
+- Dashboard `/api/agents` endpoint shows `api_key_set: true/false` but never the key value
+- Sanitization regex patterns:
+  - `Bearer <token>` → `Bearer [redacted]`
+  - `api_key=...` / `token=...` / `password=...` → `[key]=[redacted]`
 
-This proof-of-concept package excludes:
+### Logs
+- Activity log: `logs/activity.jsonl` — redacted, rotated at 10MB
+- Chat log: `logs/chat.jsonl` — redacted, rotated at 10MB
+- Session files: `sessions/*.json` — redacted, mode 0600
+- Logs accessible via `/logs/` endpoint (requires auth)
 
-- Live `endpoints.json` with real API keys.
-- Backup copies of live endpoint files.
-- Live chat sessions.
-- Live activity logs.
-- Live chat logs.
-- Any key files or bridge secrets.
+### Dependencies
+- **Zero external dependencies** — stdlib only (Python 3.11+)
+- No npm packages, no pip packages beyond stdlib
+- No database — JSON files on disk
 
-Use `config/endpoints.example.json` as the safe starting point.
+## Production Deployment Notes
 
-## Logs
+### Pi (mattpi)
+- Host: Raspberry Pi (Debian aarch64)
+- IP: `100.121.119.108` (Tailscale), `192.168.1.27` (WiFi)
+- Service: `openpibot-dashboard.service` (user systemd)
+- Firewall: iptables (persisted to `/etc/iptables/rules.v4`)
+- Backup: `dashboard.py.bak-YYYYMMDD_HHMMSS`
 
-The app redacts common secret fields such as:
+### Agent Endpoints
+- 10 agents monitored (grantbot, cwserver-ggnworker, pi-openpibot, Pi-Agent, Docbot, megbot, codybot, nigelbot, abdobot, kathybot)
+- All on Tailscale IPs in `100.64.0.0/10`
+- API keys stored in `endpoints.json` (mode 0600)
 
-- `api_key`
-- `authorization`
-- `token`
-- `password`
-- `secret`
+## Incident Response
 
-Even with redaction, logs can still contain sensitive operational details, user prompts, filenames, hostnames, internal IPs, or command outputs. Treat logs as private.
+If the dashboard is compromised:
+1. Rotate all agent API keys
+2. Change dashboard auth password
+3. Check `logs/chat.jsonl` for unauthorized commands
+4. Review iptables rules (`sudo iptables -L -n`)
+5. Check for modified `endpoints.json`
 
-## Dashboard exposure
+## Future Improvements
 
-For a proof of concept, Tailscale-only access is preferred. Avoid exposing the dashboard directly to the public internet without adding authentication and HTTPS.
-
-Recommended next hardening steps:
-
-1. Add login/authentication.
-2. Add role-based permissions.
-3. Require confirmation for dangerous commands.
-4. Use HTTPS or Tailscale Serve/Funnel appropriately.
-5. Add audit log review/export tools.
-6. Separate read-only monitoring from command/control operations.
-7. Add endpoint groups and permission scopes.
-
-## Command safety
-
-This dashboard can send commands to agents that may have shell or device-control capabilities. Treat it like a control plane, not just a status page.
-
-For plant or robotics use, add safeguards before production:
-
-- Allowlist safe commands where possible.
-- Require operator approval for movement/destructive actions.
-- Use emergency stop outside the AI layer.
-- Keep human-observable indicators for active operations.
-- Log all commands and results.
-- Keep device-level safety interlocks in place.
-
-## API key rotation
-
-If a key is accidentally exposed:
-
-1. Revoke/rotate the exposed key.
-2. Update `endpoints.json` through the Manage Agents UI or by editing the file directly.
-3. Confirm file permissions remain `600`.
-4. Restart the affected agent service if required.
+- [ ] Move from Basic Auth to session-based auth with tokens
+- [ ] Add RBAC (viewer/operator/admin)
+- [ ] Encrypt `endpoints.json` at rest
+- [ ] Add fail2ban for repeated auth failures
+- [ ] Add audit logging of auth events (login success/failure)
+- [ ] Command safety allowlists for production plant/robotics use
+- [ ] Tailscale ACLs restricting to specific users
+- [ ] Consider migrating from `http.server` to FastAPI/Flask

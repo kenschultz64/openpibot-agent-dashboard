@@ -107,11 +107,10 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/home/ken/openpibot-dashboard
+EnvironmentFile=/home/ken/openpibot-dashboard/.env    # 0600 — contains auth creds
 Environment=OPENPIBOT_DASHBOARD_DIR=/home/ken/openpibot-dashboard
 Environment=OPENPIBOT_DASHBOARD_HOST=0.0.0.0
 Environment=OPENPIBOT_DASHBOARD_PORT=8766
-Environment=OPENPIBOT_DASHBOARD_USER=admin
-Environment=OPENPIBOT_DASHBOARD_PASS=<password>
 Environment=OPENPIBOT_DASHBOARD_POLL_INTERVAL=3
 ExecStart=/usr/bin/python3 /home/ken/openpibot-dashboard/dashboard.py
 Restart=unless-stopped
@@ -119,6 +118,12 @@ RestartSec=5
 
 [Install]
 WantedBy=default.target
+```
+
+The `.env` file at `/home/ken/openpibot-dashboard/.env` (mode 600):
+```
+OPENPIBOT_DASHBOARD_USER=admin
+OPENPIBOT_DASHBOARD_PASS=<strong-password>
 ```
 
 ## Threat Model

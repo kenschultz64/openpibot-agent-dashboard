@@ -7,6 +7,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/home/ken/openpibot-dashboard
+EnvironmentFile=/home/ken/openpibot-dashboard/.env
 Environment=OPENPIBOT_DASHBOARD_DIR=/home/ken/openpibot-dashboard
 Environment=OPENPIBOT_DASHBOARD_HOST=0.0.0.0
 Environment=OPENPIBOT_DASHBOARD_PORT=8766

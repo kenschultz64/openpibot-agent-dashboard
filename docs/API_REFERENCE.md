@@ -1,5 +1,13 @@
 # API Reference
 
+All API endpoints except `/` require HTTP Basic Authentication. Requests without valid credentials receive HTTP 401.
+
+**Required header:** `Authorization: Basic <base64(user:pass)>`
+
+Rate limits:
+- Chat endpoints: 60 requests/minute per IP
+- Agent management endpoints: 10 requests/minute per IP
+
 ## `GET /`
 
 Returns the dashboard HTML interface.
@@ -27,7 +35,7 @@ Important behavior:
 
 ## `POST /api/agents`
 
-Manages dashboard endpoints.
+Manages dashboard endpoints. Agent URLs are restricted to private IP ranges only (Tailscale `100.64.0.0/10`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`). Hostnames are rejected.
 
 ### Test agent
 

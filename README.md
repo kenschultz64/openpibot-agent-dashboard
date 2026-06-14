@@ -1,56 +1,49 @@
-# OpenPiBot Multi-Agent Dashboard Proof of Concept
+# OpenPiBot Agent Dashboard
 
-This package documents and packages the Raspberry Pi OpenPiBot dashboard proof of concept.
+A lightweight, single-file Python dashboard for monitoring and controlling multiple OpenPiBot-compatible AI agents. Runs on a Raspberry Pi (or any Linux host) behind Tailscale. No external dependencies — stdlib only.
 
 ## Purpose
 
-The proof of concept shows that a Raspberry Pi can act as a low-cost, network-connected AI control node for devices, programs, and plant-floor equipment. A web dashboard monitors multiple OpenPiBot-compatible agents and gives a user a single browser-based command/control console.
+Monitor multiple OpenPiBot agents from one browser. Chat with one agent or broadcast to many at once. Manage endpoints, review activity, and keep API keys server-side — never exposed to the browser.
 
-The broader idea is a lightweight, Hermes-like agent control layer that can move quickly from device to device, computer to computer, or plant cell to plant cell.
+## Live dashboard
 
-## What was proven
+**URL:** `https://mattpi.tail5f2bd.ts.net/` (Tailscale only)
 
-- OpenPiBot can run on a Raspberry Pi and expose an OpenAI-compatible API.
-- A browser dashboard can monitor several agents at once.
-- A user can chat with/control one agent or broadcast to multiple agents.
-- The agents can run tools, execute commands, and control local software or connected devices.
-- API keys can stay server-side instead of being exposed to the browser.
-- User-level systemd services can bring the dashboard back after reboot.
-- A Pi Pico or similar microcontroller can be programmed/controlled from the agent layer.
-- This approach can scale toward robotic arms, sensors, smart devices, plant-management utilities, and PC application control.
+## Security (production-hardened)
 
-## Live proof-of-concept dashboard
+| Layer | Implementation |
+|-------|---------------|
+| HTTPS | Tailscale Serve with Let's Encrypt TLS |
+| Auth | HTTP Basic Auth on all API endpoints + in-app login form |
+| Firewall | iptables — only Tailscale subnet (`100.64.0.0/10`) can reach port 8766 |
+| Rate limiting | 60 req/min on chat, 10 req/min on agent management |
+| SSRF prevention | Agent URLs restricted to private IP ranges only |
+| Security headers | CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy |
+| Secret redaction | API keys/tokens filtered from logs and responses |
+| Session IDs | Randomized with `secrets.token_hex()` |
+| File permissions | Config, logs, sessions all mode 600 |
 
-Current internal/Tailscale URL:
+See `docs/TAILSCALE_HARDENING.md` for the full hardening guide and `docs/SECURITY_NOTES.md` for the security posture.
 
-`http://100.121.119.108:8766`
+## What it monitors
 
-Current Pi host:
+- Agent health (TCP probe + HTTP health check + model list)
+- Per-agent latency, output tokens/sec, uptime history
+- Real-time activity feed (chat requests, tool calls, completion metrics)
+- Persistent JSONL logs (activity + chat)
 
-- Hostname: `mattpi`
-- Dashboard directory: `/home/ken/openpibot-dashboard`
-- Dashboard service: `openpibot-dashboard.service`
-- Native Pi OpenPiBot service: `openpibot.service`
+## What you can do
 
-## Package contents
-
-- `src/dashboard.py` — single-file Python dashboard app.
-- `systemd/openpibot-dashboard.service` — user systemd service example.
-- `config/endpoints.example.json` — sanitized endpoint configuration example.
-- `docs/FEATURE_LIST.md` — detailed feature list for email/proposal use.
-- `docs/PROOF_OF_CONCEPT_PROPOSAL.md` — proposal-style writeup.
-- `docs/INSTALL_AND_OPERATIONS.md` — setup, reboot, and operations guide.
-- `docs/SECURITY_NOTES.md` — credentials and safety notes.
-- `docs/API_REFERENCE.md` — dashboard API reference.
-
-## Important security note
-
-This package intentionally does **not** include the live `endpoints.json`, live chat sessions, or logs because those may contain API keys, prompts, internal URLs, or other sensitive information. Use `config/endpoints.example.json` as the safe starting point.
+- Chat with one agent or broadcast to multiple agents at once
+- Manage agents (add/test/update/remove) — API keys stay on the Pi
+- Cancel in-flight requests
+- View session transcripts with context across agents
+- Download raw logs for analysis
 
 ## Quick start on a Raspberry Pi
 
-1. Copy the package contents to the Pi, for example:
-
+1. Copy the files:
    ```bash
    mkdir -p /home/ken/openpibot-dashboard
    cp src/dashboard.py /home/ken/openpibot-dashboard/dashboard.py
@@ -58,24 +51,52 @@ This package intentionally does **not** include the live `endpoints.json`, live 
    chmod 600 /home/ken/openpibot-dashboard/endpoints.json
    ```
 
-2. Edit `/home/ken/openpibot-dashboard/endpoints.json` and add real agent URLs/API keys.
+2. Create the auth env file:
+   ```bash
+   cp .env.example /home/ken/openpibot-dashboard/.env
+   chmod 600 /home/ken/openpibot-dashboard/.env
+   # Edit .env with your dashboard password
+   ```
 
-3. Install the systemd user service:
+3. Edit `endpoints.json` with your agent URLs and API keys.
 
+4. Install the systemd service:
    ```bash
    mkdir -p /home/ken/.config/systemd/user
-   cp systemd/openpibot-dashboard.service /home/ken/.config/systemd/user/openpibot-dashboard.service
+   cp systemd/openpibot-dashboard.service /home/ken/.config/systemd/user/
+   # Edit the service file — update EnvironmentFile path and env vars
    systemctl --user daemon-reload
    systemctl --user enable --now openpibot-dashboard.service
    loginctl enable-linger ken
    ```
 
-4. Open the dashboard:
-
-   ```text
-   http://PI_TAILSCALE_OR_LAN_IP:8766
+5. (Recommended) Set up iptables and Tailscale Serve:
+   ```bash
+   sudo iptables -A INPUT -p tcp --dport 8766 -s 100.64.0.0/10 -j ACCEPT
+   sudo iptables -A INPUT -p tcp --dport 8766 -j DROP
+   sudo tailscale set --operator=$USER
+   tailscale serve --bg http://PI_TAILSCALE_IP:8766
    ```
 
-## Proof-of-concept status
+6. Open `https://pi-hostname.tailnet.ts.net/` and log in.
 
-This is a working internal proof of concept. The next step would be hardening, authentication, installer scripts, a more formal agent registry, and a production deployment model for plant or lab use.
+See `docs/INSTALL_AND_OPERATIONS.md` for the full guide.
+
+## Package contents
+
+| Path | Description |
+|------|-------------|
+| `src/dashboard.py` | Single-file Python dashboard (stdlib only) |
+| `systemd/openpibot-dashboard.service` | User systemd service template |
+| `config/endpoints.example.json` | Sanitized endpoint config example |
+| `.env.example` | Environment variables template |
+| `docs/FEATURE_LIST.md` | Feature catalog |
+| `docs/PROOF_OF_CONCEPT_PROPOSAL.md` | POC proposal |
+| `docs/INSTALL_AND_OPERATIONS.md` | Full install and operations guide |
+| `docs/API_REFERENCE.md` | Dashboard API reference |
+| `docs/TAILSCALE_HARDENING.md` | 9-layer security hardening guide |
+| `docs/SECURITY_NOTES.md` | Security posture and incident response |
+
+## Status
+
+Production-hardened and running on a Raspberry Pi behind Tailscale. The hardening documented in this repo was applied June 14, 2026. Next steps: RBAC, command safety allowlists for plant/robotics use, formal agent registry.

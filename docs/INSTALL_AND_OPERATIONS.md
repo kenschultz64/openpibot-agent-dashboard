@@ -193,6 +193,89 @@ Manual fallback:
 
 These files may include prompts, responses, and operational metadata. Treat them as private. All logs are redacted — API keys, tokens, and passwords are filtered before write.
 
+## Automated monitoring with self-healing escalation
+
+The dashboard API (see [API Reference](API_REFERENCE.md#external-agent-monitoring--control)) is designed so that another AI agent — such as a Hermes cron job, a healthcheck script, or an orchestrator bot — can monitor agent health and optionally attempt non-destructive recovery before escalating to a human.
+
+### Concept: silent health watcher
+
+A cron job polls `GET /api/status` every N minutes, compares agent states against the last known snapshot, and stays silent while everything is healthy. When an agent's state changes (online → offline or offline → online), the monitor notifies you. You hear nothing 95% of the time. When you do, it matters.
+
+### Escalation ladder
+
+```
+Level 0 — DETECT
+  Dashboard API poll → agent offline
+  ⤵
+
+Level 1 — DIAGNOSE (read-only)
+  Is the host reachable? (ping / SSH)
+  Is the Docker container running? (docker ps)
+  Is the systemd service alive? (systemctl status)
+  Did GPU OOM? (nvidia-smi / dmesg)
+  ⤵
+
+Level 2 — AUTO-FIX (non-destructive only)
+  Container running but unresponsive → docker restart <name>
+  systemd service stopped → systemctl restart <unit>
+  Transient network blip → wait 2 min, re-check
+  ⤵
+
+Level 3 — NOTIFY (fix applied)
+  "kathybot was down (OOM kill). Restarted container — back online, 27ms"
+  ⤵
+
+Level 4 — ESCALATE (can't fix automatically)
+  "grantbot has been down for 15 min. Restart didn't help.
+   SSH to cwbrain5 works. docker logs shows:
+     RuntimeError: CUDA out of memory
+   Options:
+     A) Restart vLLM to free VRAM
+     B) Reduce grantbot model size
+     C) Leave offline until you investigate"
+  → Waits for human reply
+```
+
+### Safety guarantees
+
+| Guard | How |
+|-------|-----|
+| Read-only diagnosis first | Never restarts without checking `docker ps` / `systemctl status` / `dmesg` |
+| Restart only | No `docker rm`, no config changes, no rebuilds |
+| One restart attempt | If it doesn't stick, escalates — no loops |
+| Human gate for anything else | Any fix beyond `restart` → asks you |
+| All actions logged | Full trail of what was detected, attempted, and resolved |
+
+### Example: Hermes cron job
+
+With Hermes Agent, this is a single `cronjob create` command:
+
+```
+Schedule: */10 * * * *
+Prompt:   Poll the OpenPiBot dashboard at https://mattpi.tail5f2bd.ts.net/api/status
+          using Basic Auth. Compare each agent's status to the last known state
+          (stored in ~/.hermes/data/openpibot_agent_state.json). If any agent
+          changed state (online→offline or offline→online), follow the escalation
+          ladder in the openpibot-dashboard skill. Stay silent when healthy.
+```
+
+The cron agent has SSH access to all hosts (cwbrain5, cwserver, cwserver2, mattpi) and follows the ladder: diagnose first, restart if safe, escalate if the restart doesn't help. No additional infrastructure required — the dashboard API, existing SSH keys, and the Hermes cron runner are everything you need.
+
+### Without Hermes: plain shell health check
+
+If you prefer a cron-only watcher without AI-driven escalation, use the health check pattern from the [API Reference](API_REFERENCE.md#automated-health-check-cron-friendly):
+
+```bash
+STATUS=$(curl -s -u admin:password http://pi:8766/api/status)
+OFFLINE=$(echo "$STATUS" | jq '.summary.offline')
+if [ "$OFFLINE" -gt 0 ]; then
+  echo "ALERT: $OFFLINE agents offline"
+  echo "$STATUS" | jq '.endpoints[] | select(.status=="offline") | {name, base_url}'
+fi
+```
+
+This detects problems but does not attempt recovery. Pair it with a notification channel (Telegram webhook, email, etc.) to get alerted.
+
 ## Packaging rule
 
 Do not package live `endpoints.json`, live sessions, or live logs unless they have been reviewed and redacted. Use `config/endpoints.example.json` instead.

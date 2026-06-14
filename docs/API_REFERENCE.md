@@ -8,6 +8,52 @@ Rate limits:
 - Chat endpoints: 60 requests/minute per IP
 - Agent management endpoints: 10 requests/minute per IP
 
+## External Agent Monitoring & Control
+
+The dashboard API is designed to be used by other AI agents (like Hermes) for automated monitoring and orchestration. No separate agent API key is needed — use the same Basic Auth credentials.
+
+### Monitor all agents from an agent
+
+```bash
+curl -s -u admin:password http://pi:8766/api/status | jq '.summary'
+# {"total": 10, "online": 10, "degraded": 0, "offline": 0}
+```
+
+### Send a prompt to a specific agent
+
+```bash
+curl -s -u admin:password -X POST http://pi:8766/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"target":"grantbot","message":"Check your health and report status","session_id":"monitor-001"}'
+```
+
+### Broadcast to all agents
+
+```bash
+curl -s -u admin:password -X POST http://pi:8766/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"target":"all","message":"Report your current model and uptime","session_id":"monitor-001"}'
+```
+
+### Cancel an active request
+
+```bash
+curl -s -u admin:password -X POST http://pi:8766/api/chat/cancel \
+  -H "Content-Type: application/json" \
+  -d '{"request_id":"req-1718400000000-a1b2c3"}'
+```
+
+### Automated health check (cron-friendly)
+
+```bash
+STATUS=$(curl -s -u admin:password http://pi:8766/api/status)
+OFFLINE=$(echo "$STATUS" | jq '.summary.offline')
+if [ "$OFFLINE" -gt 0 ]; then
+  echo "ALERT: $OFFLINE agents offline"
+  echo "$STATUS" | jq '.endpoints[] | select(.status=="offline") | {name, base_url}'
+fi
+```
+
 ## `GET /`
 
 Returns the dashboard HTML interface.
